@@ -30,31 +30,35 @@ class GitHubWikiAPI:
             # Clean up any existing clone
             subprocess.run(['rm', '-rf', self.wiki_dir], check=False)
             
-            # Set up git credentials using token
+            # Configure git to use token authentication
             subprocess.run([
-                'git', 'config', '--global', 'credential.helper', 'store'
+                'git', 'config', '--global', 'user.name', 'AI Documentation Bot'
+            ], check=True)
+            subprocess.run([
+                'git', 'config', '--global', 'user.email', 'noreply@github.com'
             ], check=True)
             
-            # Create credentials file
-            credentials_file = os.path.expanduser('~/.git-credentials')
-            with open(credentials_file, 'w') as f:
-                f.write(f"https://{self.github_token}@github.com\n")
-            
-            # Clone the wiki repo using HTTPS with token in URL
-            clone_url = f"https://{self.github_token}@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
+            # Clone using token as username with empty password
+            clone_url = f"https://github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
             result = subprocess.run([
                 'git', 'clone', clone_url, self.wiki_dir
             ], capture_output=True, text=True, env={
                 **os.environ,
-                'GIT_ASKPASS': 'echo',
+                'GIT_ASKPASS': '/bin/echo',
                 'GIT_USERNAME': self.github_token,
-                'GIT_PASSWORD': ''
+                'GIT_PASSWORD': 'x-oauth-basic'
             })
             
             if result.returncode != 0:
-                print(f"Failed to clone wiki: {result.stderr}")
+                print(f"Clone failed: {result.stderr}")
                 # Try to create wiki if it doesn't exist
                 return self._create_wiki_if_not_exists()
+            
+            # Set up authentication for this repo
+            subprocess.run([
+                'git', 'remote', 'set-url', 'origin', 
+                f"https://{self.github_token}:x-oauth-basic@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
+            ], cwd=self.wiki_dir, check=True)
             
             return True
         except Exception as e:
@@ -68,8 +72,6 @@ class GitHubWikiAPI:
             # Initialize a new git repo
             os.makedirs(self.wiki_dir, exist_ok=True)
             subprocess.run(['git', 'init'], cwd=self.wiki_dir, check=True)
-            
-            # Configure git
             subprocess.run(['git', 'config', 'user.name', 'AI Documentation Bot'], 
                          cwd=self.wiki_dir, check=True)
             subprocess.run(['git', 'config', 'user.email', 'noreply@github.com'], 
@@ -87,20 +89,19 @@ This wiki contains automatically generated documentation for data changes in thi
             with open(f"{self.wiki_dir}/Home.md", 'w') as f:
                 f.write(home_content)
             
-            # Add remote origin
-            remote_url = f"https://{self.github_token}@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
+            # Add remote with token authentication
+            remote_url = f"https://{self.github_token}:x-oauth-basic@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
             subprocess.run(['git', 'remote', 'add', 'origin', remote_url], 
                          cwd=self.wiki_dir, check=True)
             
-            # Initial commit
+            # Initial commit and push
             subprocess.run(['git', 'add', '.'], cwd=self.wiki_dir, check=True)
             subprocess.run(['git', 'commit', '-m', 'Initial wiki setup'], 
                          cwd=self.wiki_dir, check=True)
             
-            # Push to create the wiki
+            # Push using the configured remote
             result = subprocess.run(['git', 'push', '-u', 'origin', 'master'], 
-                                  cwd=self.wiki_dir, capture_output=True, text=True,
-                                  env={**os.environ, 'GIT_ASKPASS': 'echo'})
+                                  cwd=self.wiki_dir, capture_output=True, text=True)
             
             if result.returncode != 0:
                 print(f"Failed to create wiki: {result.stderr}")
@@ -128,9 +129,6 @@ This wiki contains automatically generated documentation for data changes in thi
     def create_or_update_page(self, page_title: str, content: str) -> bool:
         """Create or update a wiki page"""
         try:
-            # Ensure wiki directory exists
-            os.makedirs(self.wiki_dir, exist_ok=True)
-            
             # Convert title to filename (GitHub wiki format)
             filename = page_title.replace(' ', '-').replace('/', '-')
             page_file = f"{self.wiki_dir}/{filename}.md"
@@ -139,28 +137,16 @@ This wiki contains automatically generated documentation for data changes in thi
             with open(page_file, 'w', encoding='utf-8') as f:
                 f.write(content)
             
-            # Configure git in the wiki directory
-            subprocess.run(['git', 'config', 'user.name', 'AI Documentation Bot'], 
-                         cwd=self.wiki_dir, check=True)
-            subprocess.run(['git', 'config', 'user.email', 'noreply@github.com'], 
-                         cwd=self.wiki_dir, check=True)
-            
-            # Add, commit, and push
+            # Add and commit
             subprocess.run(['git', 'add', f'{filename}.md'], cwd=self.wiki_dir, check=True)
             
             commit_message = f"Update documentation: {page_title}"
             subprocess.run(['git', 'commit', '-m', commit_message], 
                          cwd=self.wiki_dir, check=True)
             
-            # Push with proper environment variables for authentication
+            # Push using the pre-configured remote with token
             push_result = subprocess.run(['git', 'push', 'origin', 'master'], 
-                                       cwd=self.wiki_dir, capture_output=True, text=True,
-                                       env={
-                                           **os.environ,
-                                           'GIT_ASKPASS': 'echo',
-                                           'GIT_USERNAME': self.github_token,
-                                           'GIT_PASSWORD': ''
-                                       })
+                                       cwd=self.wiki_dir, capture_output=True, text=True)
             
             if push_result.returncode != 0:
                 print(f"Failed to push to wiki: {push_result.stderr}")
