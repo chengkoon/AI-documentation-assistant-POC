@@ -108,20 +108,40 @@ class AIDocumentationGenerator:
     def get_git_changes(self, commit_sha: str) -> Dict:
         """Get git diff and commit info for ALL changed files"""
         try:
+            # Ensure we're in a git repository
+            result = subprocess.run(['git', 'rev-parse', '--git-dir'], 
+                                  capture_output=True, text=True)
+            if result.returncode != 0:
+                print("Error: Not in a git repository")
+                return {}
+            
+            # Check if commit exists
+            result = subprocess.run(['git', 'cat-file', '-e', commit_sha], 
+                                  capture_output=True)
+            if result.returncode != 0:
+                print(f"Error: Commit {commit_sha} not found")
+                return {}
+            
             # Get commit message
             commit_msg = subprocess.check_output([
                 'git', 'log', '-1', '--pretty=%B', commit_sha
             ], text=True).strip()
             
             # Get files changed
-            files_changed = subprocess.check_output([
+            files_changed_output = subprocess.check_output([
                 'git', 'diff-tree', '--no-commit-id', '--name-only', '-r', commit_sha
-            ], text=True).strip().split('\n')
+            ], text=True).strip()
+            
+            files_changed = [f for f in files_changed_output.split('\n') if f.strip()]
             
             # Get ALL diff content - let AI decide what's relevant
             diff_content = subprocess.check_output([
                 'git', 'show', '--format=', commit_sha
             ], text=True)
+            
+            print(f"Found {len(files_changed)} changed files:")
+            for file in files_changed:
+                print(f"  - {file}")
             
             return {
                 'commit_message': commit_msg,
@@ -131,47 +151,81 @@ class AIDocumentationGenerator:
         except subprocess.CalledProcessError as e:
             print(f"Error getting git changes: {e}")
             return {}
+        except Exception as e:
+            print(f"Unexpected error getting git changes: {e}")
+            return {}
     
     def analyze_with_ai(self, changes: Dict) -> Optional[str]:
         """Send ALL changes to AI for intelligent analysis of data-related impacts"""
         if not changes.get('diff_content'):
             print("No code changes found")
             return None
+        
+        print(f"Analyzing {len(changes.get('files_changed', []))} changed files...")
+        
+        # Enhanced file pattern detection for better relevance checking
+        schema_files = [f for f in changes.get('files_changed', []) 
+                       if any(pattern in f.lower() for pattern in [
+                           'schema.sql', 'migration', '.sql', 'ddl', 'create_table'
+                       ])]
+        
+        entity_files = [f for f in changes.get('files_changed', []) 
+                       if any(pattern in f.lower() for pattern in [
+                           'entity', 'model', 'domain', '.java', '.py', '.cs'
+                       ])]
+        
+        api_files = [f for f in changes.get('files_changed', []) 
+                    if any(pattern in f.lower() for pattern in [
+                        'api.yaml', 'openapi', 'swagger', 'controller', 'endpoint'
+                    ])]
+        
+        print(f"  Schema files: {len(schema_files)}")
+        print(f"  Entity/Model files: {len(entity_files)}")  
+        print(f"  API files: {len(api_files)}")
+        
+        # If we have obvious data-related files, skip the relevance check
+        has_obvious_data_changes = bool(schema_files or entity_files or api_files)
+        
+        if has_obvious_data_changes:
+            print("Detected obvious data-related changes, proceeding to documentation...")
+        else:
+            print("No obvious data files detected, checking with AI...")
             
         # Two-stage AI analysis: first determine relevance, then generate documentation
-        relevance_prompt = f"""
-        Analyze the following code changes to determine if they contain any data-related modifications that would benefit from documentation.
-        
-        Commit Message: {changes.get('commit_message', '')}
-        Files Changed: {', '.join(changes.get('files_changed', []))}
-        
-        CODE CHANGES:
-        {changes.get('diff_content', '')[:8000]}  # Truncate for initial analysis
-        
-        Look for ANY of these patterns (regardless of file type or naming convention):
-        
-        1. **Database Schema Changes**: CREATE TABLE, ALTER TABLE, ADD COLUMN, DROP COLUMN, CREATE INDEX
-        2. **SQL Query Changes**: SELECT statements, WHERE clauses, JOIN operations, new queries, modified queries
-        3. **Data Mapping**: Object mapping, field assignments, data transformation code
-        4. **API Response Changes**: New fields in JSON responses, modified data structures
-        5. **Data Processing Logic**: How data is filtered, aggregated, or transformed
-        6. **Configuration Changes**: Database connections, data source settings
-        7. **Migration Scripts**: Data migration or cleanup scripts
-        
-        Respond with either:
-        - "RELEVANT" if you find data-related changes that could benefit from documentation
-        - "NOT_RELEVANT" if the changes are purely UI, styling, logging, or other non-data related
-        
-        Be inclusive - if there's any doubt, respond with "RELEVANT".
-        """
-        
-        relevance_result = self._call_ai_service(relevance_prompt)
-        
-        if not relevance_result or "NOT_RELEVANT" in relevance_result:
-            print("AI determined changes are not data-related")
-            return None
+        if not has_obvious_data_changes:
+            relevance_prompt = f"""
+            Analyze the following code changes to determine if they contain any data-related modifications that would benefit from documentation.
             
-        print("AI detected data-related changes, generating documentation...")
+            Commit Message: {changes.get('commit_message', '')}
+            Files Changed: {', '.join(changes.get('files_changed', []))}
+            
+            CODE CHANGES:
+            {changes.get('diff_content', '')[:8000]}  # Truncate for initial analysis
+            
+            Look for ANY of these patterns (regardless of file type or naming convention):
+            
+            1. **Database Schema Changes**: CREATE TABLE, ALTER TABLE, ADD COLUMN, DROP COLUMN, CREATE INDEX
+            2. **SQL Query Changes**: SELECT statements, WHERE clauses, JOIN operations, new queries, modified queries
+            3. **Data Mapping**: Object mapping, field assignments, data transformation code
+            4. **API Response Changes**: New fields in JSON responses, modified data structures
+            5. **Data Processing Logic**: How data is filtered, aggregated, or transformed
+            6. **Configuration Changes**: Database connections, data source settings
+            7. **Migration Scripts**: Data migration or cleanup scripts
+            
+            Respond with either:
+            - "RELEVANT" if you find data-related changes that could benefit from documentation
+            - "NOT_RELEVANT" if the changes are purely UI, styling, logging, or other non-data related
+            
+            Be inclusive - if there's any doubt, respond with "RELEVANT".
+            """
+            
+            relevance_result = self._call_ai_service(relevance_prompt)
+            
+            if not relevance_result or "NOT_RELEVANT" in relevance_result:
+                print("AI determined changes are not data-related")
+                return None
+        
+        print("Generating comprehensive documentation...")
         
         # Full documentation analysis
         documentation_prompt = f"""
@@ -288,24 +342,35 @@ def main():
     parser.add_argument('--repo-owner', help='GitHub repository owner (e.g., "mycompany")')
     parser.add_argument('--repo-name', help='GitHub repository name (e.g., "myapp")')
     parser.add_argument('--dry-run', action='store_true', help='Print documentation without updating wiki')
+    parser.add_argument('--local-test', action='store_true', help='Run locally without requiring GitHub token')
     
     args = parser.parse_args()
+    
+    # Handle local testing - set defaults if not provided
+    if args.local_test or args.dry_run:
+        if not args.repo_owner:
+            args.repo_owner = "local"
+        if not args.repo_name:
+            args.repo_name = "test"
     
     # Get environment variables
     ai_api_key = os.getenv('AI_API_KEY') or os.getenv('ANTHROPIC_API_KEY')
     github_token = os.getenv('GITHUB_TOKEN')
     
-    # Extract repo info from GitHub context if not provided
-    if not args.repo_owner or not args.repo_name:
+    # Extract repo info from GitHub context if not provided and not in local test mode
+    if not args.local_test and (not args.repo_owner or not args.repo_name):
         github_repository = os.getenv('GITHUB_REPOSITORY', '')
         if '/' in github_repository:
             args.repo_owner, args.repo_name = github_repository.split('/', 1)
         else:
             print("Error: Could not determine repository owner/name")
+            print("Use --local-test flag for local testing or provide --repo-owner and --repo-name")
             sys.exit(1)
     
-    if not ai_api_key:
-        print("Error: AI_API_KEY or ANTHROPIC_API_KEY environment variable required")
+    # For local testing, we can skip AI API requirement
+    if not args.local_test and not ai_api_key:
+        print("Error: AI_API_KEY environment variable required")
+        print("Use --local-test flag to analyze changes without AI")
         sys.exit(1)
     
     # Initialize AI generator
@@ -317,6 +382,24 @@ def main():
     
     if not changes or not changes.get('diff_content'):
         print("No changes found")
+        sys.exit(0)
+    
+    # For local testing, show the changes without AI analysis
+    if args.local_test:
+        # Still run the enhanced analysis for display
+        ai_gen.analyze_with_ai(changes)
+        
+        print("\n" + "="*60)
+        print("COMMIT ANALYSIS (Local Test Mode)")
+        print("="*60)
+        print(f"Commit Message: {changes.get('commit_message', '')}")
+        print(f"Files Changed: {', '.join(changes.get('files_changed', []))}")
+        print("\nDiff Content Preview:")
+        print("-" * 40)
+        print(changes.get('diff_content', '')[:2000])  # Show first 2000 chars
+        if len(changes.get('diff_content', '')) > 2000:
+            print("\n... (truncated for display)")
+        print("\nRun without --local-test flag to get AI analysis")
         sys.exit(0)
     
     # Analyze with AI
