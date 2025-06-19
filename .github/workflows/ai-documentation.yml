@@ -40,13 +40,13 @@ jobs:
         
     - name: Generate AI Documentation
       env:
-        AI_API_KEY: ${{ secrets.AI_API_KEY }}  # or ANTHROPIC_API_KEY
+        AI_API_KEY: ${{ secrets.AI_API_KEY }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_REPOSITORY: ${{ github.repository }}
       run: |
         python scripts/ai_doc_generator.py \
           --commit-sha ${{ github.sha }} \
-          --ai-provider openai
+          --ai-provider anthropic
           
     - name: Generate Documentation (Dry Run) on PR
       if: github.event_name == 'pull_request' && github.event.action != 'closed'
@@ -57,5 +57,5 @@ jobs:
       run: |
         python scripts/ai_doc_generator.py \
           --commit-sha ${{ github.event.pull_request.head.sha }} \
-          --ai-provider openai \
+          --ai-provider anthropic \
           --dry-run

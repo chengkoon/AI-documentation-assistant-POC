@@ -284,7 +284,7 @@ class AIDocumentationGenerator:
 def main():
     parser = argparse.ArgumentParser(description='Generate AI documentation for database changes')
     parser.add_argument('--commit-sha', required=True, help='Git commit SHA to analyze')
-    parser.add_argument('--ai-provider', default='openai', choices=['openai', 'anthropic'])
+    parser.add_argument('--ai-provider', default='anthropic', choices=['openai', 'anthropic'])
     parser.add_argument('--repo-owner', help='GitHub repository owner (e.g., "mycompany")')
     parser.add_argument('--repo-name', help='GitHub repository name (e.g., "myapp")')
     parser.add_argument('--dry-run', action='store_true', help='Print documentation without updating wiki')
@@ -292,7 +292,7 @@ def main():
     args = parser.parse_args()
     
     # Get environment variables
-    ai_api_key = os.getenv('AI_API_KEY')
+    ai_api_key = os.getenv('AI_API_KEY') or os.getenv('ANTHROPIC_API_KEY')
     github_token = os.getenv('GITHUB_TOKEN')
     
     # Extract repo info from GitHub context if not provided
@@ -305,7 +305,7 @@ def main():
             sys.exit(1)
     
     if not ai_api_key:
-        print("Error: AI_API_KEY environment variable required")
+        print("Error: AI_API_KEY or ANTHROPIC_API_KEY environment variable required")
         sys.exit(1)
     
     # Initialize AI generator
