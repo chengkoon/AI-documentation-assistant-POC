@@ -27,6 +27,7 @@ public class PostService {
         com.aiassistant.api.model.Post post = new com.aiassistant.api.model.Post();
         post.setId(entity.getId());
         post.setTitle(entity.getTitle());
+        post.setSubtitle(entity.getSubtitle());
         post.setContent(entity.getContent());
         
         if (entity.getCreatedAt() != null) {
