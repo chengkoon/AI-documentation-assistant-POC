@@ -42,9 +42,6 @@ components:
         title:
           type: string
           description: Title of the post
-        subtitle:
-          type: string
-          description: Subtitle of the post
         content:
           type: string
           description: Content of the post
