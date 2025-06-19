@@ -1,16 +1,14 @@
 name: AI Documentation Generator
 
 on:
-  push:
-    branches: [ main, master ]  # Trigger on pushes to main/master
   pull_request:
-    types: [ closed ]  # Also trigger when PRs are merged
-    branches: [ main, master ]
+    types: [ closed ]  # Only trigger when PR is closed
+    branches: [ main ] # Only for PRs targeting main branch
 
 jobs:
   generate-documentation:
-    # Only run on merged PRs or direct pushes to main
-    if: github.event_name == 'push' || (github.event.pull_request.merged == true)
+    # Only run if the PR was actually merged (not just closed)
+    if: github.event.pull_request.merged == true
     
     runs-on: ubuntu-latest
     
@@ -21,7 +19,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        fetch-depth: 2  # Fetch last 2 commits to get diff
+        fetch-depth: 0  # Fetch full history for better git operations
         
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -38,6 +36,18 @@ jobs:
         git config --global user.name "AI Documentation Bot"
         git config --global user.email "noreply@github.com"
         
+    - name: Debug Git Information
+      run: |
+        echo "PR merged into main: ${{ github.event.pull_request.merge_commit_sha }}"
+        echo "PR head commit: ${{ github.event.pull_request.head.sha }}"
+        echo "Current commit: ${{ github.sha }}"
+        echo "Git log:"
+        git log --oneline -5
+        echo "Git status:"
+        git status
+        echo "Changed files in this PR:"
+        git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} || echo "Could not get PR diff"
+        
     - name: Generate AI Documentation
       env:
         AI_API_KEY: ${{ secrets.AI_API_KEY }}
@@ -45,17 +55,5 @@ jobs:
         GITHUB_REPOSITORY: ${{ github.repository }}
       run: |
         python scripts/ai_doc_generator.py \
-          --commit-sha ${{ github.sha }} \
-          --ai-provider anthropic
-          
-    - name: Generate Documentation (Dry Run) on PR
-      if: github.event_name == 'pull_request' && github.event.action != 'closed'
-      env:
-        AI_API_KEY: ${{ secrets.AI_API_KEY }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITHUB_REPOSITORY: ${{ github.repository }}
-      run: |
-        python scripts/ai_doc_generator.py \
           --commit-sha ${{ github.event.pull_request.head.sha }} \
-          --ai-provider anthropic \
-          --dry-run
+          --ai-provider anthropic
