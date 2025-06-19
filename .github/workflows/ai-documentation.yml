@@ -1,16 +1,14 @@
 name: AI Documentation Generator
 
 on:
-  push:
-    branches: [ main, master ]  # Trigger on pushes to main/master
   pull_request:
-    types: [ closed ]  # Also trigger when PRs are merged
+    types: [ closed ]  # trigger when PRs are merged
     branches: [ main, master ]
 
 jobs:
   generate-documentation:
-    # Only run on merged PRs or direct pushes to main
-    if: github.event_name == 'push' || (github.event.pull_request.merged == true)
+    # Only run on merged PRs
+    if: (github.event.pull_request.merged == true)
     
     runs-on: ubuntu-latest
     
