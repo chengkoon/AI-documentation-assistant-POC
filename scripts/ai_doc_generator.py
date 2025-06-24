@@ -362,6 +362,7 @@ class AIDocumentationGenerator:
         
         response = requests.post(url, headers=headers, data=json.dumps(data))
         if response.status_code == 200:
+            print(response.text[:10000])
             return response.json()["content"][0]["text"]
         else:
             print(f"Anthropic API error: {response.status_code} - {response.text}")
