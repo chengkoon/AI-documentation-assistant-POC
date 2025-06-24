@@ -38,27 +38,16 @@ class GitHubWikiAPI:
                 'git', 'config', '--global', 'user.email', 'noreply@github.com'
             ], check=True)
             
-            # Clone using token as username with empty password
-            clone_url = f"https://github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
+            # Clone using token in URL (modern method)
+            clone_url = f"https://{self.github_token}@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
             result = subprocess.run([
                 'git', 'clone', clone_url, self.wiki_dir
-            ], capture_output=True, text=True, env={
-                **os.environ,
-                'GIT_ASKPASS': '/bin/echo',
-                'GIT_USERNAME': self.github_token,
-                'GIT_PASSWORD': 'x-oauth-basic'
-            })
+            ], capture_output=True, text=True)
             
             if result.returncode != 0:
                 print(f"Clone failed: {result.stderr}")
                 # Try to create wiki if it doesn't exist
                 return self._create_wiki_if_not_exists()
-            
-            # Set up authentication for this repo
-            subprocess.run([
-                'git', 'remote', 'set-url', 'origin', 
-                f"https://{self.github_token}:x-oauth-basic@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
-            ], cwd=self.wiki_dir, check=True)
             
             return True
         except Exception as e:
@@ -89,8 +78,8 @@ This wiki contains automatically generated documentation for data changes in thi
             with open(f"{self.wiki_dir}/Home.md", 'w') as f:
                 f.write(home_content)
             
-            # Add remote with token authentication
-            remote_url = f"https://{self.github_token}:x-oauth-basic@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
+            # Add remote with token authentication (modern method)
+            remote_url = f"https://{self.github_token}@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
             subprocess.run(['git', 'remote', 'add', 'origin', remote_url], 
                          cwd=self.wiki_dir, check=True)
             
@@ -144,7 +133,12 @@ This wiki contains automatically generated documentation for data changes in thi
             subprocess.run(['git', 'commit', '-m', commit_message], 
                          cwd=self.wiki_dir, check=True)
             
-            # Push using the pre-configured remote with token
+            # Ensure remote URL is correct with token authentication
+            remote_url = f"https://{self.github_token}@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
+            subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], 
+                         cwd=self.wiki_dir, check=True)
+            
+            # Push using the updated remote URL
             push_result = subprocess.run(['git', 'push', 'origin', 'master'], 
                                        cwd=self.wiki_dir, capture_output=True, text=True)
             
