@@ -384,6 +384,297 @@ class AIDocumentationGenerator:
             print(f"Anthropic API error: {response.status_code} - {response.text}")
             return None
 
+    def analyze_wiki_structure(self) -> Dict:
+        """Analyze the current wiki structure and content to understand existing documentation"""
+        try:
+            wiki_analysis = {
+                'pages': {},
+                'structure': {},
+                'topics_covered': [],
+                'schema_pages': [],
+                'api_pages': [],
+                'data_flow_pages': []
+            }
+            
+            # Get all markdown files in the wiki
+            wiki_files = []
+            for root, dirs, files in os.walk(self.wiki_dir):
+                for file in files:
+                    if file.endswith('.md'):
+                        wiki_files.append(file)
+            
+            # Analyze each page
+            for file in wiki_files:
+                page_name = file.replace('.md', '').replace('-', ' ')
+                file_path = os.path.join(self.wiki_dir, file)
+                
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # Store page content and metadata
+                    wiki_analysis['pages'][page_name] = {
+                        'filename': file,
+                        'content': content,
+                        'length': len(content),
+                        'has_schema_content': self._contains_schema_content(content),
+                        'has_api_content': self._contains_api_content(content),
+                        'has_data_flow_content': self._contains_data_flow_content(content),
+                        'last_updated': self._extract_last_update_date(content)
+                    }
+                    
+                    # Categorize pages
+                    if self._contains_schema_content(content):
+                        wiki_analysis['schema_pages'].append(page_name)
+                    if self._contains_api_content(content):
+                        wiki_analysis['api_pages'].append(page_name)
+                    if self._contains_data_flow_content(content):
+                        wiki_analysis['data_flow_pages'].append(page_name)
+                        
+                except Exception as e:
+                    print(f"Error reading wiki page {file}: {e}")
+            
+            return wiki_analysis
+            
+        except Exception as e:
+            print(f"Error analyzing wiki structure: {e}")
+            return {'pages': {}, 'structure': {}, 'topics_covered': []}
+    
+    def _contains_schema_content(self, content: str) -> bool:
+        """Check if content contains database schema related information"""
+        schema_keywords = [
+            'CREATE TABLE', 'ALTER TABLE', 'ADD COLUMN', 'DROP COLUMN',
+            'PRIMARY KEY', 'FOREIGN KEY', 'INDEX', 'CONSTRAINT',
+            'database schema', 'table structure', 'column', 'field'
+        ]
+        content_lower = content.lower()
+        return any(keyword.lower() in content_lower for keyword in schema_keywords)
+    
+    def _contains_api_content(self, content: str) -> bool:
+        """Check if content contains API related information"""
+        api_keywords = [
+            'API', 'endpoint', 'JSON', 'response', 'request',
+            'REST', 'GraphQL', '/api/', 'GET', 'POST', 'PUT', 'DELETE'
+        ]
+        content_lower = content.lower()
+        return any(keyword.lower() in content_lower for keyword in api_keywords)
+    
+    def _contains_data_flow_content(self, content: str) -> bool:
+        """Check if content contains data flow related information"""
+        flow_keywords = [
+            'data flow', 'data pipeline', 'transformation', 'mapping',
+            'service', 'controller', 'repository', 'entity'
+        ]
+        content_lower = content.lower()
+        return any(keyword.lower() in content_lower for keyword in flow_keywords)
+    
+    def _extract_last_update_date(self, content: str) -> Optional[str]:
+        """Extract the last update date from content if available"""
+        import re
+        # Look for common date patterns
+        date_patterns = [
+            r'\*\*Date:\*\*\s*([0-9]{4}-[0-9]{2}-[0-9]{2})',
+            r'([0-9]{4}-[0-9]{2}-[0-9]{2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2})',
+            r'Update\s+([0-9]{4}-[0-9]{2}-[0-9]{2})'
+        ]
+        
+        for pattern in date_patterns:
+            match = re.search(pattern, content)
+            if match:
+                return match.group(1)
+        return None
+
+    def intelligent_documentation_strategy(self, changes: Dict, wiki_analysis: Dict) -> Dict:
+        """Use AI to determine the intelligent documentation strategy based on changes and current wiki state"""
+        
+        # Create a comprehensive prompt for the AI to analyze the situation
+        strategy_prompt = f"""
+        You are an intelligent documentation system. Analyze the following code changes against the current wiki state and determine the optimal documentation strategy.
+
+        **CURRENT WIKI STRUCTURE:**
+        {self._format_wiki_summary(wiki_analysis)}
+
+        **CODE CHANGES TO ANALYZE:**
+        Commit Message: {changes.get('commit_message', '')}
+        Files Changed: {', '.join(changes.get('files_changed', []))}
+        
+        CODE DIFF:
+        {changes.get('diff_content', '')[:12000]}
+
+        **YOUR TASK:**
+        Analyze whether these changes introduce NEW data-related concepts that are NOT already documented in the wiki.
+
+        **EVALUATION CRITERIA:**
+        1. **Schema Changes**: New tables, columns, relationships not already documented
+        2. **API Changes**: New endpoints, response formats not already covered
+        3. **Data Flow Changes**: New business logic, data transformations not documented
+        4. **Configuration Changes**: Database settings, connections not covered
+
+        **RESPOND WITH A JSON OBJECT:**
+        {{
+            "needs_documentation": true/false,
+            "reasoning": "Explain why documentation is/isn't needed",
+            "changes_summary": "Brief summary of what's actually new",
+            "documentation_strategy": {{
+                "action": "create_new_page" | "update_existing_page" | "append_to_page" | "update_multiple_pages",
+                "target_pages": ["page1", "page2"] or ["new_page_name"],
+                "content_type": "schema" | "api" | "data_flow" | "mixed",
+                "priority": "high" | "medium" | "low"
+            }},
+            "page_recommendations": {{
+                "primary_page": "recommended page name",
+                "sections_to_update": ["section1", "section2"],
+                "new_sections_needed": ["new_section1"]
+            }}
+        }}
+
+        **IMPORTANT:**
+        - Only recommend documentation if there are GENUINELY NEW data concepts not already covered
+        - Be specific about which wiki pages should be updated based on their current content
+        - Consider the existing wiki structure when making recommendations
+        - If changes are minor updates to existing documented features, set needs_documentation to false
+        """
+        
+        strategy_result = self._call_ai_service(strategy_prompt)
+        
+        try:
+            # Parse the AI response as JSON
+            import json
+            strategy = json.loads(strategy_result)
+            return strategy
+        except json.JSONDecodeError:
+            print(f"Error parsing AI strategy response: {strategy_result}")
+            # Fallback to simple analysis
+            return {
+                "needs_documentation": True,
+                "reasoning": "Fallback analysis - assuming documentation needed",
+                "documentation_strategy": {
+                    "action": "create_new_page",
+                    "target_pages": ["Data-Changes-Fallback"],
+                    "content_type": "mixed",
+                    "priority": "medium"
+                }
+            }
+
+    def _format_wiki_summary(self, wiki_analysis: Dict) -> str:
+        """Format wiki analysis for AI consumption"""
+        summary = "EXISTING WIKI PAGES:\n\n"
+        
+        for page_name, page_info in wiki_analysis['pages'].items():
+            summary += f"**{page_name}** ({page_info['length']} chars)\n"
+            summary += f"  - Contains Schema Content: {page_info['has_schema_content']}\n"
+            summary += f"  - Contains API Content: {page_info['has_api_content']}\n" 
+            summary += f"  - Contains Data Flow Content: {page_info['has_data_flow_content']}\n"
+            if page_info['last_updated']:
+                summary += f"  - Last Updated: {page_info['last_updated']}\n"
+            summary += f"  - Content Preview: {page_info['content'][:200]}...\n\n"
+        
+        summary += f"\nSCHEMA PAGES: {', '.join(wiki_analysis['schema_pages'])}\n"
+        summary += f"API PAGES: {', '.join(wiki_analysis['api_pages'])}\n"
+        summary += f"DATA FLOW PAGES: {', '.join(wiki_analysis['data_flow_pages'])}\n"
+        
+        return summary
+
+    def execute_intelligent_documentation(self, strategy: Dict, documentation_content: str, changes: Dict) -> bool:
+        """Execute the documentation strategy determined by AI"""
+        try:
+            action = strategy['documentation_strategy']['action']
+            target_pages = strategy['documentation_strategy']['target_pages']
+            
+            if action == "create_new_page":
+                return self._create_new_intelligent_page(target_pages[0], documentation_content, changes, strategy)
+                
+            elif action == "update_existing_page":
+                return self._update_existing_intelligent_page(target_pages[0], documentation_content, changes, strategy)
+                
+            elif action == "append_to_page":
+                return self._append_to_intelligent_page(target_pages[0], documentation_content, changes, strategy)
+                
+            elif action == "update_multiple_pages":
+                success = True
+                for page in target_pages:
+                    if not self._update_existing_intelligent_page(page, documentation_content, changes, strategy):
+                        success = False
+                return success
+                
+            else:
+                print(f"Unknown documentation action: {action}")
+                return False
+                
+        except Exception as e:
+            print(f"Error executing intelligent documentation strategy: {e}")
+            return False
+
+    def _create_new_intelligent_page(self, page_name: str, content: str, changes: Dict, strategy: Dict) -> bool:
+        """Create a new page with intelligent structure based on AI strategy"""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        commit_sha = changes.get('commit_message', '')[:8] if changes.get('commit_message') else 'unknown'
+        
+        page_header = f"""# {page_name}
+
+**Created:** {timestamp}  
+**Trigger:** {strategy.get('reasoning', 'Data changes detected')}  
+**Content Type:** {strategy['documentation_strategy'].get('content_type', 'mixed')}
+
+---
+
+"""
+        
+        full_content = page_header + content
+        return self.create_or_update_page(page_name, full_content)
+
+    def _update_existing_intelligent_page(self, page_name: str, new_content: str, changes: Dict, strategy: Dict) -> bool:
+        """Intelligently update an existing page by merging new content"""
+        existing_content = self.get_page(page_name)
+        
+        if not existing_content:
+            # Page doesn't exist, create it
+            return self._create_new_intelligent_page(page_name, new_content, changes, strategy)
+        
+        # Use AI to intelligently merge content
+        merge_prompt = f"""
+        You need to intelligently merge new documentation content into an existing wiki page.
+
+        **EXISTING PAGE CONTENT:**
+        {existing_content}
+
+        **NEW CONTENT TO INTEGRATE:**
+        {new_content}
+
+        **MERGE STRATEGY:**
+        - Update relevant sections with new information
+        - Add new sections if the content covers new topics
+        - Maintain existing structure and organization
+        - Add update timestamps where appropriate
+        - Avoid duplication
+
+        **RETURN THE COMPLETE UPDATED PAGE CONTENT:**
+        """
+        
+        merged_content = self._call_ai_service(merge_prompt)
+        return self.create_or_update_page(page_name, merged_content)
+
+    def _append_to_intelligent_page(self, page_name: str, content: str, changes: Dict, strategy: Dict) -> bool:
+        """Append content to an existing page with intelligent formatting"""
+        existing_content = self.get_page(page_name) or f"# {page_name}\n\n"
+        
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        commit_sha = changes.get('commit_message', '')[:8] if changes.get('commit_message') else 'unknown'
+        
+        append_section = f"""
+---
+
+## Update {timestamp} - {strategy.get('changes_summary', 'Data Changes')}
+
+{content}
+
+"""
+        
+        updated_content = existing_content + append_section
+        return self.create_or_update_page(page_name, updated_content)
+
 def main():
     parser = argparse.ArgumentParser(description='Generate AI documentation for database changes')
     parser.add_argument('--commit-sha', required=True, help='Git commit SHA to analyze')
@@ -444,38 +735,48 @@ def main():
     
     wiki = GitHubWikiAPI(args.repo_owner, args.repo_name, github_token)
     
-    # Clone wiki repository
+    # Clone wiki repository to analyze current state
     print("Cloning wiki repository...")
     if not wiki.clone_wiki():
         print("Failed to clone wiki repository")
         sys.exit(1)
     
-    # Create page title with timestamp for uniqueness
-    from datetime import datetime
-    timestamp = datetime.now().strftime("%Y-%m-%d")
-    page_title = f"Data-Changes-{timestamp}-{args.commit_sha[:8]}"
+    # STEP 1: Analyze current wiki structure and content
+    print("Analyzing current wiki structure...")
+    wiki_analysis = wiki.analyze_wiki_structure()
+    print(f"Found {len(wiki_analysis['pages'])} existing pages")
     
-    # Add metadata header to documentation
-    commit_msg = changes.get('commit_message', '').split('\n')[0]  # First line only
-    metadata_header = f"""# Data Changes Documentation
-
-**Commit:** `{args.commit_sha[:8]}`  
-**Date:** {timestamp}  
-**Summary:** {commit_msg}
-
----
-
-"""
+    # STEP 2: Use AI to determine if documentation is needed and strategy
+    print("Determining intelligent documentation strategy...")
+    strategy = wiki.intelligent_documentation_strategy(changes, wiki_analysis)
     
-    full_documentation = metadata_header + documentation
+    print(f"AI Strategy: {strategy.get('reasoning', 'No reasoning provided')}")
     
-    # Create or update wiki page
-    print(f"Creating wiki page: {page_title}")
-    if wiki.create_or_update_page(page_title, full_documentation):
-        wiki_url = f"https://github.com/{args.repo_owner}/{args.repo_name}/wiki/{page_title.replace(' ', '-')}"
-        print(f"Documentation created: {wiki_url}")
+    if not strategy.get('needs_documentation', False):
+        print("AI determined no new documentation is needed")
+        print(f"Reason: {strategy.get('reasoning', 'Changes already covered in existing documentation')}")
+        sys.exit(0)
+    
+    # STEP 3: Generate documentation content for the new changes
+    print("Generating documentation for new changes...")
+    documentation = ai_gen.analyze_with_ai(changes)
+    
+    if not documentation or documentation.strip() == "NO_DOCUMENTATION_NEEDED":
+        print("AI content generator determined no documentation update needed")
+        sys.exit(0)
+    
+    # STEP 4: Execute the intelligent documentation strategy
+    print(f"Executing documentation strategy: {strategy['documentation_strategy']['action']}")
+    print(f"Target pages: {strategy['documentation_strategy']['target_pages']}")
+    
+    if wiki.execute_intelligent_documentation(strategy, documentation, changes):
+        primary_page = strategy.get('page_recommendations', {}).get('primary_page', 
+                                  strategy['documentation_strategy']['target_pages'][0])
+        wiki_url = f"https://github.com/{args.repo_owner}/{args.repo_name}/wiki/{primary_page.replace(' ', '-')}"
+        print(f"Documentation successfully updated: {wiki_url}")
+        print(f"Strategy executed: {strategy['documentation_strategy']['action']}")
     else:
-        print("Failed to update wiki")
+        print("Failed to execute documentation strategy")
         sys.exit(1)
 
 if __name__ == "__main__":
