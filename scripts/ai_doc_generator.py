@@ -303,7 +303,7 @@ This wiki contains automatically generated documentation for data changes in thi
         3. **Data Flow Changes**: New business logic, data transformations not documented
         4. **Configuration Changes**: Database settings, connections not covered
 
-        **RESPOND WITH A JSON OBJECT:**
+        **RESPOND WITH A JSON OBJECT (no markdown formatting, just pure JSON):**
         {{
             "needs_documentation": true/false,
             "reasoning": "Explain why documentation is/isn't needed",
@@ -326,17 +326,39 @@ This wiki contains automatically generated documentation for data changes in thi
         - Be specific about which wiki pages should be updated based on their current content
         - Consider the existing wiki structure when making recommendations
         - If changes are minor updates to existing documented features, set needs_documentation to false
+        - Return ONLY the JSON object, no additional text or markdown formatting
         """
         
         strategy_result = ai_generator._call_ai_service(strategy_prompt)
         
         try:
-            # Parse the AI response as JSON
+            # Parse the AI response as JSON, handling markdown code blocks
             import json
-            strategy = json.loads(strategy_result)
+            import re
+            
+            # Clean the response by extracting JSON from markdown code blocks if present
+            cleaned_result = strategy_result.strip()
+            
+            # Check if response is wrapped in markdown code blocks
+            if cleaned_result.startswith('```json'):
+                # Extract JSON from markdown code block
+                json_match = re.search(r'```json\s*\n(.*?)\n```', cleaned_result, re.DOTALL)
+                if json_match:
+                    cleaned_result = json_match.group(1).strip()
+                else:
+                    # Fallback: remove the opening ```json and closing ```
+                    cleaned_result = cleaned_result.replace('```json', '').replace('```', '').strip()
+            elif cleaned_result.startswith('```'):
+                # Handle generic code blocks
+                cleaned_result = re.sub(r'^```[^\n]*\n', '', cleaned_result)
+                cleaned_result = re.sub(r'\n```$', '', cleaned_result)
+                cleaned_result = cleaned_result.strip()
+            
+            strategy = json.loads(cleaned_result)
             return strategy
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             print(f"Error parsing AI strategy response: {strategy_result}")
+            print(f"JSON parsing error: {e}")
             # Fallback to simple analysis
             return {
                 "needs_documentation": True,
