@@ -30,7 +30,7 @@ class GitHubWikiAPI:
             # Clean up any existing clone
             subprocess.run(['rm', '-rf', self.wiki_dir], check=False)
             
-            # Configure git to use token authentication
+            # Configure git globally
             subprocess.run([
                 'git', 'config', '--global', 'user.name', 'AI Documentation Bot'
             ], check=True)
@@ -38,11 +38,28 @@ class GitHubWikiAPI:
                 'git', 'config', '--global', 'user.email', 'noreply@github.com'
             ], check=True)
             
-            # Clone using token in URL (modern method)
-            clone_url = f"https://{self.github_token}@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
+            # Configure git to use token via credential helper (official method)
+            subprocess.run([
+                'git', 'config', '--global', 'credential.helper', 'store'
+            ], check=True)
+            
+            # Create credentials file with token (official method)
+            # Format from GitHub docs: username is required but not used for auth, token is the password
+            credentials_content = f"https://github-actions:{self.github_token}@github.com"
+            credentials_path = os.path.expanduser("~/.git-credentials")
+            with open(credentials_path, 'w') as f:
+                f.write(credentials_content + '\n')
+            os.chmod(credentials_path, 0o600)  # Secure file permissions
+            
+            # Set environment variables to prevent interactive prompts
+            env = os.environ.copy()
+            env['GIT_TERMINAL_PROMPT'] = '0'
+            
+            # Clone using standard HTTPS URL (official method)
+            clone_url = f"https://github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
             result = subprocess.run([
                 'git', 'clone', clone_url, self.wiki_dir
-            ], capture_output=True, text=True)
+            ], capture_output=True, text=True, env=env)
             
             if result.returncode != 0:
                 print(f"Clone failed: {result.stderr}")
@@ -60,6 +77,8 @@ class GitHubWikiAPI:
             print("Wiki doesn't exist, creating initial wiki...")
             # Initialize a new git repo
             os.makedirs(self.wiki_dir, exist_ok=True)
+            
+            # Configure git in the wiki directory
             subprocess.run(['git', 'init'], cwd=self.wiki_dir, check=True)
             subprocess.run(['git', 'config', 'user.name', 'AI Documentation Bot'], 
                          cwd=self.wiki_dir, check=True)
@@ -78,19 +97,23 @@ This wiki contains automatically generated documentation for data changes in thi
             with open(f"{self.wiki_dir}/Home.md", 'w') as f:
                 f.write(home_content)
             
-            # Add remote with token authentication (modern method)
-            remote_url = f"https://{self.github_token}@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
+            # Add remote using standard HTTPS URL (credentials already configured globally)
+            remote_url = f"https://github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
             subprocess.run(['git', 'remote', 'add', 'origin', remote_url], 
                          cwd=self.wiki_dir, check=True)
+            
+            # Set up environment to prevent prompts
+            env = os.environ.copy()
+            env['GIT_TERMINAL_PROMPT'] = '0'
             
             # Initial commit and push
             subprocess.run(['git', 'add', '.'], cwd=self.wiki_dir, check=True)
             subprocess.run(['git', 'commit', '-m', 'Initial wiki setup'], 
                          cwd=self.wiki_dir, check=True)
             
-            # Push using the configured remote
+            # Push using standard method with credential helper
             result = subprocess.run(['git', 'push', '-u', 'origin', 'master'], 
-                                  cwd=self.wiki_dir, capture_output=True, text=True)
+                                  cwd=self.wiki_dir, capture_output=True, text=True, env=env)
             
             if result.returncode != 0:
                 print(f"Failed to create wiki: {result.stderr}")
@@ -133,14 +156,13 @@ This wiki contains automatically generated documentation for data changes in thi
             subprocess.run(['git', 'commit', '-m', commit_message], 
                          cwd=self.wiki_dir, check=True)
             
-            # Ensure remote URL is correct with token authentication
-            remote_url = f"https://{self.github_token}@github.com/{self.repo_owner}/{self.repo_name}.wiki.git"
-            subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], 
-                         cwd=self.wiki_dir, check=True)
+            # Set up environment to prevent interactive prompts
+            env = os.environ.copy()
+            env['GIT_TERMINAL_PROMPT'] = '0'
             
-            # Push using the updated remote URL
+            # Push using credential helper (credentials already configured)
             push_result = subprocess.run(['git', 'push', 'origin', 'master'], 
-                                       cwd=self.wiki_dir, capture_output=True, text=True)
+                                       cwd=self.wiki_dir, capture_output=True, text=True, env=env)
             
             if push_result.returncode != 0:
                 print(f"Failed to push to wiki: {push_result.stderr}")
