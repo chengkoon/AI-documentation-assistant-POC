@@ -7,36 +7,34 @@ Automate documentation updates when code changes are merged to release branches 
 
 ### Core Workflow
 1. **PR merged to release branch** → triggers GitHub Actions
-2. **Python script** sends PR diff + doc summaries to LLM
-3. **LLM analysis** identifies pages needing updates
-4. **Auto-create documentation PR** with findings/suggestions
-5. **Human review & update** docs in the PR
-6. **Merge docs PR** → sync to Confluence
+2. **Python script** sends PR diff + full doc content to LLM
+3. **LLM returns** text-based replacements for specific files
+4. **Auto-apply changes** and create documentation commit
+5. **Push commit** directly to main branch or create PR
+6. **Sync to Confluence** after successful commit
 
 ### Token Optimization Approach
-- **Two-phase LLM calls**: 
-  - Phase A: Send PR diff + doc titles/intros for triage
-  - Phase B: Send full content only for flagged pages
+- **Single LLM call**: Send PR diff + full doc content, get back specific replacements
 - **Text-based replacements**: Use before/after text chunks instead of line numbers
 - **GitHub as source of truth**: Store docs in markdown, sync to Confluence
-- **Future optimization**: Embedding-based similarity search for pre-filtering
+- **Future optimization**: Embedding-based similarity search for pre-filtering relevant pages
 
 ## Implementation Phases
 
-### Phase 1: Detection & Flagging Only
-**Goal:** Build confidence in LLM's ability to identify relevant documentation changes
+### Phase 1: Direct Text-Based Updates
+**Goal:** Auto-apply documentation changes with single LLM call
 
 **Features:**
-- Send PR diff + doc page titles/intros to LLM
-- LLM returns: list of pages that might need updates + reasoning
-- Create GitHub PR with analysis findings
-- Human reviews flagged pages manually
-- No auto-editing yet
+- Send PR diff + full doc content to LLM in one call
+- LLM returns: text-based replacements for affected files
+- Auto-apply changes and create commit
+- Push to main branch or create PR based on configuration
 
 **Files to create:**
 - `doc_analyzer.py` - Main script handling workflow
 - `llm_client.py` - LLM API calls (Claude/OpenAI)
-- `github_helper.py` - GitHub API interactions
+- `github_helper.py` - GitHub API interactions (get diff, files, commit changes)
+- `text_replacer.py` - Handles text-based find/replace operations
 - `config.py` - Configuration and API keys
 - `requirements.txt` - Python dependencies
 - `.github/workflows/doc-analysis.yml` - GitHub Actions workflow
@@ -44,84 +42,84 @@ Automate documentation updates when code changes are merged to release branches 
 - `test_analyzer.py` - Basic tests
 - `README.md` - Setup and usage instructions
 
-**Output:** GitHub PR with structured analysis like:
-```markdown
-## Documentation Analysis Results
+**LLM Input Format:**
+```
+PR Diff: [full code diff]
 
-Based on code changes in PR #123, the following documentation pages may need updates:
+Current Documentation Files:
+--- docs/authentication.md ---
+[full file content]
 
-### High Confidence
-- `docs/authentication.md` - Added JWT token validation requires auth guide updates
-- `docs/api-security.md` - New security patterns should be documented
+--- docs/api-security.md ---
+[full file content]
 
-### Medium Confidence  
-- `docs/getting-started.md` - Auth flow examples may need refresh
-
-### LLM Reasoning
-The changes introduce JWT token validation in `auth.py` which impacts how users authenticate...
-
----
-**This is an automated analysis. Please review and manually update the flagged documentation files.**
+Please analyze and return specific text replacements needed.
 ```
 
-### Phase 2: Add Change Suggestions
-**Goal:** Test LLM's ability to suggest specific changes
-
-**Features:**
-- For flagged pages, send full markdown content to LLM
-- LLM returns: specific change suggestions using before/after text chunks
-- Still requires human approval before any changes
-- Creates GitHub PR with both analysis AND suggested changes
-
-**Example LLM output format:**
+**LLM Output Format:**
 ```json
 {
   "changes": [
     {
+      "file": "docs/authentication.md",
       "action": "replace",
       "find": "## API Authentication\n\nCurrently supports basic auth only.",
       "replace": "## API Authentication\n\nSupports basic auth and OAuth 2.0. For OAuth setup:\n\n1. Register your app\n2. Get client credentials\n3. Use authorization flow"
     },
     {
+      "file": "docs/api-security.md", 
       "action": "insert_after",
       "find": "### Rate Limits\n\nAPI calls are limited to 1000/hour.",
       "insert": "\n\n### Error Handling\n\nAll errors return standard HTTP codes with JSON responses."
     }
-  ]
+  ],
+  "reasoning": "Added JWT support in auth.py requires documentation updates for new OAuth flow..."
 }
 ```
 
-### Phase 3: Controlled Auto-Updates
-**Goal:** Automate simple, low-risk changes
+### Phase 2: Add Safety & Validation
+**Goal:** Make auto-updates more reliable and safe
 
 **Features:**
-- Add confidence scoring to LLM responses
-- Auto-apply only high-confidence changes (maybe just additions, not deletions)
-- Everything else still goes to human review
-- All changes create PRs for review, never direct commits
+- Validate all "find" text exists before applying changes
+- Add dry-run mode for testing
+- Implement rollback mechanism
+- Add change confidence scoring
+- Log all changes with reasoning
 
 **Safety mechanisms:**
-- Only auto-apply changes with >90% confidence
-- Never auto-delete content, only add or modify
-- All changes logged and reversible
+- Pre-validate all text replacements
+- Backup original files before changes
+- Detailed logging of all operations
+- Ability to revert commits if needed
 
-### Phase 4: Full Automation (Future)
-**Goal:** Minimize human intervention for routine updates
+### Phase 3: Optimization & Intelligence
+**Goal:** Reduce token usage and improve accuracy
 
 **Features:**
-- Most changes auto-applied based on confidence scores
-- Only edge cases require human review
-- Add embedding-based filtering for better page selection
-- Advanced change validation
+- Add embedding-based pre-filtering of relevant documentation pages
+- Implement smarter chunking for large documentation sets
+- Add learning from previous successful/failed changes
+- Optimize prompts based on results
+
+### Phase 4: Advanced Features (Future)
+**Goal:** Handle complex documentation scenarios
+
+**Features:**
+- Support for multi-file changes with dependencies
+- Automatic creation of new documentation pages
+- Integration with documentation style guides
+- Advanced conflict resolution
 
 ## Key Safety Features (All Phases)
 
+- **Text validation** before applying any changes (ensure "find" text exists)
 - **Dry-run mode** for testing without making changes
-- **Detailed logging** of all LLM decisions and reasoning
-- **Rollback mechanism** for bad changes
-- **Human override** always available
-- **Gradual confidence building** - start with obvious cases
-- **Text-based replacements** instead of brittle line numbers
+- **Detailed logging** of all LLM decisions and text replacements
+- **Rollback mechanism** for bad changes (Git revert capability)
+- **Backup strategy** - save original files before modification
+- **Change validation** - verify replacements don't break markdown formatting
+- **Human override** always available through manual commits
 
 ## Text-Based Replacement Strategy
 
@@ -204,26 +202,28 @@ The changes introduce JWT token validation in `auth.py` which impacts how users 
 ## Success Metrics
 
 **Phase 1:**
-- Accuracy of page flagging (precision/recall)
-- Time saved in manual doc review
-- False positive rate
+- Accuracy of text replacements (successful vs failed)
+- Time saved in manual doc updates
+- Token usage per documentation update
+- Number of successful auto-commits vs rollbacks
 
 **Phase 2:**
-- Quality of suggested changes
-- Acceptance rate of LLM suggestions
-- Reduction in doc debt
+- Validation accuracy (catching bad replacements before apply)
+- Dry-run vs actual run success rates
+- Time from code change to doc commit
 
 **Phase 3+:**
-- Percentage of changes auto-applied successfully
-- Time from code change to doc update
-- Overall documentation freshness
+- Token usage reduction from embedding pre-filtering
+- Overall documentation freshness and accuracy
+- Developer satisfaction with auto-updates
 
 ## Getting Started
 
-1. **Set up Phase 1** with basic detection and flagging
-2. **Validate LLM accuracy** on your specific codebase
-3. **Iterate on prompts** based on false positives/negatives
-4. **Gradually add automation** as confidence builds
-5. **Monitor and adjust** based on team feedback
+1. **Set up Phase 1** with direct text-based updates
+2. **Test extensively** in dry-run mode on your codebase
+3. **Validate text replacement accuracy** before enabling auto-commits
+4. **Start with low-risk changes** (additions rather than deletions)
+5. **Monitor commit quality** and add rollback procedures
+6. **Gradually expand** to more complex changes as confidence builds
 
-Remember: Start conservative, build confidence, then automate incrementally.
+Remember: Start with robust validation, then enable automation incrementally.
